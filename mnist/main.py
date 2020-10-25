@@ -1,10 +1,24 @@
+
+# 令python2.X使用print时也需要print()的格式，本来是不用的
 from __future__ import print_function
+# 解析参数命令的库
 import argparse
+# import pytorch
 import torch
+# Neural Networks 神经网络模块
 import torch.nn as nn
+'''
+nn.X与nn.functional.X类似，一个参数不包括输入，另一个包括输入。
+具有学习参数的 (例如 conv2d, linear, batch_norm)采用nn.X
+没有学习参数的 (例如 maxpool, loss func, activation func) 根据个人选择
+dropout必须nn.X方式
+'''
 import torch.nn.functional as F
+# 优化器 SGD Adam等
 import torch.optim as optim
+# datasets 常用数据集 transforms 常用的数据预处理操作
 from torchvision import datasets, transforms
+# 学习率衰减，根据epoch训练次数调整学习率
 from torch.optim.lr_scheduler import StepLR
 
 
@@ -23,6 +37,7 @@ class Net(nn.Module):
         x = F.relu(x)
         x = self.conv2(x)
         x = F.relu(x)
+        # 2 kernel size
         x = F.max_pool2d(x, 2)
         x = self.dropout1(x)
         x = torch.flatten(x, 1)
@@ -35,14 +50,22 @@ class Net(nn.Module):
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
+    # 训练模式 对Dropout BatchNorm有影响
     model.train()
+    # batch_idx通过enumerate函数出现的
     for batch_idx, (data, target) in enumerate(train_loader):
+        # 数据加载到device环境
         data, target = data.to(device), target.to(device)
+        # 梯度归零
         optimizer.zero_grad()
+        # 负对数似然损失
         output = model(data)
         loss = F.nll_loss(output, target)
+        # 反向传播
         loss.backward()
+        # 更新参数
         optimizer.step()
+        # 进度条显示
         if batch_idx % args.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
@@ -52,15 +75,19 @@ def train(args, model, device, train_loader, optimizer, epoch):
 
 
 def test(model, device, test_loader):
+    # 评估模式
     model.eval()
     test_loss = 0
     correct = 0
+    # 不关联计算图
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
+            # 默认是mean所以要特别指定'sum'
             test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+            # item()获取数值；view_as() target被看成与pred相同size
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
@@ -73,6 +100,15 @@ def test(model, device, test_loader):
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
+    '''
+    metavar: 注释里的别名。
+    batch_size: 多少个样本更新一次参数。
+    epochs: 整个数据集被使用了多少次。
+    gamma: 学习率衰减的参数。
+    dry_run: 试运行。
+    seed: 参数的随机种子。
+    log_interval: 多少个批次打印一次训练结果。
+    '''
     parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                         help='input batch size for training (default: 64)')
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
@@ -93,22 +129,32 @@ def main():
                         help='how many batches to wait before logging training status')
     parser.add_argument('--save-model', action='store_true', default=False,
                         help='For Saving the current Model')
+    # 解析参数
     args = parser.parse_args()
+    # 是否使用GPU
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
+    # 固定初始化参数，使结果可复现。
     torch.manual_seed(args.seed)
 
+    # 运行环境
     device = torch.device("cuda" if use_cuda else "cpu")
 
     train_kwargs = {'batch_size': args.batch_size}
     test_kwargs = {'batch_size': args.test_batch_size}
     if use_cuda:
+        '''
+        num_worker: 多少个进程负责加载数据
+        pin_memory: 锁页内存，加载到GPU会快一点
+        shuffle: 打乱
+        '''
         cuda_kwargs = {'num_workers': 1,
                        'pin_memory': True,
                        'shuffle': True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
 
+    # PIL转Tensor并且归一化（[0,1]）、标准化（均值0方差1）
     transform=transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
@@ -117,12 +163,13 @@ def main():
                        transform=transform)
     dataset2 = datasets.MNIST('../data', train=False,
                        transform=transform)
+    # 数据加载、采样
     train_loader = torch.utils.data.DataLoader(dataset1,**train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
 
     model = Net().to(device)
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
-
+    # step_size 调用step()一次，学习率衰减一次
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, epoch)
